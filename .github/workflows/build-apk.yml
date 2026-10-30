@@ -10,14 +10,14 @@ permissions:
 
 jobs:
   build:
-    name: Compile and verify installable debug APK
+    name: Build and verify Minecraft V2 APK
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -26,45 +26,58 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept Android SDK licenses
+      - name: Accept SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install Android SDK packages
+      - name: Install SDK packages
         run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Install Gradle 8.9
+      - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
           cache-disabled: true
 
-      - name: Print tool versions
+      - name: Diagnose build environment
+        shell: bash
         run: |
+          set -euxo pipefail
           java -version
+          command -v gradle
           gradle --version
+          test -f settings.gradle
+          test -f build.gradle
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
           sdkmanager --list_installed
 
-      - name: Compile debug APK
-        run: gradle --no-daemon --stacktrace clean assembleDebug
+      - name: Compile APK
+        shell: bash
+        run: gradle --no-daemon --stacktrace --info clean assembleDebug
 
-      - name: Verify APK exists and is signed
+      - name: Verify APK and signature
         shell: bash
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
-          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
-          "$APKSIGNER" verify --verbose "$APK"
-          echo "## APK build result" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Gradle compilation: passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "- APK signature verification: passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Output: app-debug.apk" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Device launch test: not performed by this workflow" >> "$GITHUB_STEP_SUMMARY"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
 
-      - name: Upload installable APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: minecraft-v2-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload diagnostic logs if build fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-v2-build-diagnostics
+          path: |
+            **/build/reports/**
+            **/build/outputs/logs/**
+          if-no-files-found: warn
+          retention-days: 7
