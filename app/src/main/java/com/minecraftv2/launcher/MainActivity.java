@@ -662,7 +662,12 @@ public class MainActivity extends Activity {
         return d;
     }
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + 0.5f); }
-    @Override public void onDestroy() {\n        if (speech != null) { speech.stop(); speech.shutdown(); }\n        super.onDestroy();\n    }\n\n    private void hideKeyboard() {
+    @Override public void onDestroy() {
+        if (speech != null) { speech.stop(); speech.shutdown(); }
+        super.onDestroy();
+    }
+
+    private void hideKeyboard() {
         try {
             ((InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(composer.getWindowToken(), 0);
             composer.clearFocus();
