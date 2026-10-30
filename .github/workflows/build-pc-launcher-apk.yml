@@ -30,10 +30,10 @@ jobs:
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;28.2.13676358"
 
       - name: Checkout Amethyst Android source with submodules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: AngelAuraMC/Amethyst-Android
           ref: v3_openjdk
