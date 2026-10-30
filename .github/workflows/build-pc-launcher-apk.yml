@@ -1,9 +1,7 @@
-name: Build Minecraft Java Launcher APK
+name: Build Minecraft Java Launcher APK (manual only)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 permissions:
   contents: read
