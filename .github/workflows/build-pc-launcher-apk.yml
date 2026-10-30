@@ -1,0 +1,58 @@
+name: Build Minecraft Java Launcher APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Android launcher from Amethyst source
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Checkout Amethyst Android source with submodules
+        uses: actions/checkout@v4
+        with:
+          repository: AngelAuraMC/Amethyst-Android
+          ref: v3_openjdk
+          submodules: recursive
+          path: amethyst-source
+
+      - name: Make Gradle wrapper executable
+        working-directory: amethyst-source
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        working-directory: amethyst-source
+        run: ./gradlew --no-daemon --stacktrace :app_pojavlauncher:assembleDebug
+
+      - name: Verify APK exists
+        run: |
+          set -euo pipefail
+          find amethyst-source/app_pojavlauncher/build/outputs/apk -type f -name '*.apk' -print
+          test -s amethyst-source/app_pojavlauncher/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-java-pc-style-launcher-apk
+          path: amethyst-source/app_pojavlauncher/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
