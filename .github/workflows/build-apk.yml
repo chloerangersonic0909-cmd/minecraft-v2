@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     name: Compile and verify installable debug APK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - name: Checkout source
@@ -32,11 +32,20 @@ jobs:
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Build Android app with Gradle 8.9
-        uses: gradle/gradle-build-action@v3
+      - name: Install Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-          arguments: clean assembleDebug --stacktrace
+          cache-disabled: true
+
+      - name: Print tool versions
+        run: |
+          java -version
+          gradle --version
+          sdkmanager --list_installed
+
+      - name: Compile debug APK
+        run: gradle --no-daemon --stacktrace clean assembleDebug
 
       - name: Verify APK exists and is signed
         shell: bash
