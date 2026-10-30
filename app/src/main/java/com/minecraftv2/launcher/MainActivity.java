@@ -12,6 +12,11 @@ import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.content.Context;
+import android.content.Intent;
+import android.content.ClipboardManager;
+import android.content.ClipData;
+import android.speech.tts.TextToSpeech;
+import java.util.Locale;
 import android.content.SharedPreferences;
 import android.widget.Button;
 import android.widget.EditText;
@@ -43,12 +48,14 @@ public class MainActivity extends Activity {
     private Button sendButton;
     private boolean busy = false;
     private final JSONArray history = new JSONArray();
+    private TextToSpeech speech;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         getWindow().getDecorView().setSystemUiVisibility(0);
+        speech = new TextToSpeech(this, result -> { if (speech != null && result == TextToSpeech.SUCCESS) speech.setLanguage(new Locale("th", "TH")); });
         buildUi();
         if (getApiKey().isEmpty()) composer.postDelayed(() -> showApiKeyDialog(false), 400);
     }
@@ -167,7 +174,8 @@ public class MainActivity extends Activity {
         composer.setText("");
         hideKeyboard();
         if (messages.getChildCount() > 0 && history.length() == 0) messages.removeAllViews();
-        addBubble("คุณ", prompt, true);
+        TextView userView = addBubble("คุณ", prompt, true);
+        userView.setTag(history.length());
         try {
             JSONObject user = new JSONObject();
             user.put("role", "user");
@@ -269,8 +277,29 @@ public class MainActivity extends Activity {
         body.setTextColor(TEXT);
         body.setTextSize(15);
         body.setTextIsSelectable(true);
+        if (user) body.setTag(history.length());
         body.setPadding(0, dp(5), 0, dp(1));
         wrapper.addView(body);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        actions.setPadding(0, dp(5), 0, 0);
+        Button copy = smallAction("คัดลอก");
+        copy.setOnClickListener(v -> copyText(body.getText().toString()));
+        actions.addView(copy);
+        Button share = smallAction("แชร์");
+        share.setOnClickListener(v -> shareText(body.getText().toString()));
+        actions.addView(share);
+        Button speak = smallAction("อ่านข้อความ");
+        speak.setOnClickListener(v -> speakText(body.getText().toString()));
+        actions.addView(speak);
+        if (user) {
+            Button edit = smallAction("แก้ไข");
+            edit.setOnClickListener(v -> editUserMessage(wrapper, body));
+            actions.addView(edit);
+        }
+        wrapper.addView(actions);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
         p.setMargins(dp(2), dp(5), dp(2), dp(8));
         messages.addView(wrapper, p);
@@ -278,7 +307,83 @@ public class MainActivity extends Activity {
         return body;
     }
 
-    private void showApiKeyDialog(boolean allowCancel) {
+
+    private Button smallAction(String text) {
+        Button b = button(text);
+        b.setTextSize(11);
+        b.setMinHeight(dp(32));
+        b.setMinimumHeight(dp(32));
+        b.setPadding(dp(5), 0, dp(5), 0);
+        return b;
+    }
+
+    private void copyText(String text) {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        clipboard.setPrimaryClip(ClipData.newPlainText("FoChat message", text));
+        Toast.makeText(this, "คัดลอกข้อความแล้ว", Toast.LENGTH_SHORT).show();
+    }
+
+    private void shareText(String text) {
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TEXT, text);
+        startActivity(Intent.createChooser(intent, "แชร์ข้อความจาก FoChat"));
+    }
+
+    private void speakText(String text) {
+        if (speech == null) {
+            Toast.makeText(this, "ระบบอ่านข้อความยังไม่พร้อม", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        speech.speak(text, TextToSpeech.QUEUE_FLUSH, null, "fochat-message");
+    }
+
+    private void editUserMessage(LinearLayout wrapper, TextView body) {
+        Object tag = body.getTag();
+        if (!(tag instanceof Integer)) {
+            Toast.makeText(this, "ไม่พบข้อความที่จะแก้ไข", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final int historyIndex = (Integer) tag;
+        EditText editor = new EditText(this);
+        editor.setText(body.getText());
+        editor.setMinLines(3);
+        editor.setGravity(Gravity.TOP);
+        new AlertDialog.Builder(this)
+            .setTitle("แก้ไขข้อความของคุณ")
+            .setView(editor)
+            .setNegativeButton("ยกเลิก", null)
+            .setPositiveButton("บันทึกและถามใหม่", (dialog, which) -> {
+                String revised = editor.getText().toString().trim();
+                if (revised.isEmpty()) {
+                    Toast.makeText(this, "ข้อความห้ามว่าง", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (busy) {
+                    Toast.makeText(this, "รอให้ AI ตอบเสร็จก่อน", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                try {
+                    JSONObject updated = new JSONObject();
+                    updated.put("role", "user");
+                    updated.put("content", revised);
+                    history.put(historyIndex, updated);
+                    while (history.length() > historyIndex + 1) history.remove(history.length() - 1);
+                    int childIndex = messages.indexOfChild(wrapper);
+                    while (messages.getChildCount() > childIndex + 1) {
+                        messages.removeViewAt(messages.getChildCount() - 1);
+                    }
+                    body.setText(revised);
+                    busy = true;
+                    sendButton.setEnabled(false);
+                    status = addBubble("FoChat aii", "กำลังสร้างคำตอบใหม่…", false);
+                    new Thread(() -> requestAnswer()).start();
+                } catch (Exception e) {
+                    Toast.makeText(this, "แก้ไขไม่สำเร็จ: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            }).show();
+    }
+\n    private void showApiKeyDialog(boolean allowCancel) {
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setHint("sk-or-v1-...");
@@ -327,7 +432,7 @@ public class MainActivity extends Activity {
         return d;
     }
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + 0.5f); }
-    private void hideKeyboard() {
+    @Override public void onDestroy() {\n        if (speech != null) { speech.stop(); speech.shutdown(); }\n        super.onDestroy();\n    }\n\n    private void hideKeyboard() {
         try {
             ((InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(composer.getWindowToken(), 0);
             composer.clearFocus();
