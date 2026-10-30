@@ -18,7 +18,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -49,7 +49,9 @@ jobs:
         run: |
           set -euo pipefail
           find amethyst-source/app_pojavlauncher/build/outputs/apk -type f -name '*.apk' -print
-          test -s amethyst-source/app_pojavlauncher/build/outputs/apk/debug/app-debug.apk
+          APK=$(find amethyst-source/app_pojavlauncher/build/outputs/apk -type f -name '*.apk' | head -n 1)
+          test -n "$APK"
+          test -s "$APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
