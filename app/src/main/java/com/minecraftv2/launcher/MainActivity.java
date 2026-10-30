@@ -15,6 +15,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ClipboardManager;
 import android.content.ClipData;
+import android.app.Dialog;
 import android.speech.tts.TextToSpeech;
 import java.util.Locale;
 import android.content.SharedPreferences;
@@ -49,6 +50,8 @@ public class MainActivity extends Activity {
     private boolean busy = false;
     private final JSONArray history = new JSONArray();
     private TextToSpeech speech;
+    private String currentChatId = "chat_default";
+    private String currentChatTitle = "แชทใหม่";
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -56,6 +59,8 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(BG);
         getWindow().getDecorView().setSystemUiVisibility(0);
         speech = new TextToSpeech(this, result -> { if (speech != null && result == TextToSpeech.SUCCESS) speech.setLanguage(new Locale("th", "TH")); });
+        ensureChats();
+        loadCurrentChat();
         buildUi();
         if (getApiKey().isEmpty()) composer.postDelayed(() -> showApiKeyDialog(false), 400);
     }
@@ -76,6 +81,12 @@ public class MainActivity extends Activity {
         brand.setTextSize(21);
         brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         top.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
+        Button newChat = button("＋ แชทใหม่");
+        newChat.setOnClickListener(v -> createNewChat());
+        top.addView(newChat);
+        Button historyButton = button("ประวัติ");
+        historyButton.setOnClickListener(v -> showChatHistory());
+        top.addView(historyButton);
         Button settings = button("ตั้งค่า");
         settings.setOnClickListener(v -> showApiKeyDialog(true));
         top.addView(settings);
@@ -96,7 +107,7 @@ public class MainActivity extends Activity {
         scroll.addView(messages);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        if (history.length() == 0) addWelcome();
+        renderCurrentChat();
 
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -181,6 +192,8 @@ public class MainActivity extends Activity {
             user.put("role", "user");
             user.put("content", prompt);
             history.put(user);
+            if ("แชทใหม่".equals(currentChatTitle)) renameChatIfNeeded(prompt);
+            saveCurrentChat();
         } catch (Exception ignored) {}
         busy = true;
         sendButton.setEnabled(false);
@@ -237,6 +250,9 @@ public class MainActivity extends Activity {
         final String finalAnswer = answer;
         runOnUiThread(() -> {
             if (status != null) status.setText(finalAnswer);
+            if (status != null && finalAnswer != null && !finalAnswer.startsWith("เชื่อมต่อ")) {
+                try { JSONObject assistant = new JSONObject(); assistant.put("role", "assistant"); assistant.put("content", finalAnswer); saveCurrentChat(); } catch (Exception ignored) {}
+            }
             busy = false;
             sendButton.setEnabled(true);
             scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
@@ -369,6 +385,7 @@ public class MainActivity extends Activity {
                     updated.put("content", revised);
                     history.put(historyIndex, updated);
                     while (history.length() > historyIndex + 1) history.remove(history.length() - 1);
+                    saveCurrentChat();
                     int childIndex = messages.indexOfChild(wrapper);
                     while (messages.getChildCount() > childIndex + 1) {
                         messages.removeViewAt(messages.getChildCount() - 1);
@@ -383,7 +400,220 @@ public class MainActivity extends Activity {
                 }
             }).show();
     }
-\n    private void showApiKeyDialog(boolean allowCancel) {
+\n    private void ensureChats() {
+        try {
+            JSONArray chats = new JSONArray(getPrefs().getString("chats_json", "[]"));
+            if (chats.length() == 0) {
+                JSONObject chat = new JSONObject();
+                chat.put("id", currentChatId);
+                chat.put("title", currentChatTitle);
+                chat.put("messages", new JSONArray());
+                chats.put(chat);
+                getPrefs().edit().putString("chats_json", chats.toString()).putString("current_chat_id", currentChatId).apply();
+            } else {
+                currentChatId = getPrefs().getString("current_chat_id", chats.getJSONObject(0).optString("id", "chat_default"));
+            }
+        } catch (Exception e) {
+            currentChatId = "chat_default";
+            currentChatTitle = "แชทใหม่";
+        }
+    }
+
+    private JSONArray readChats() {
+        try { return new JSONArray(getPrefs().getString("chats_json", "[]")); }
+        catch (Exception e) { return new JSONArray(); }
+    }
+
+    private void saveCurrentChat() {
+        try {
+            JSONArray chats = readChats();
+            boolean found = false;
+            for (int i = 0; i < chats.length(); i++) {
+                JSONObject chat = chats.getJSONObject(i);
+                if (currentChatId.equals(chat.optString("id"))) {
+                    chat.put("title", currentChatTitle);
+                    chat.put("messages", new JSONArray(history.toString()));
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                JSONObject chat = new JSONObject();
+                chat.put("id", currentChatId);
+                chat.put("title", currentChatTitle);
+                chat.put("messages", new JSONArray(history.toString()));
+                chats.put(chat);
+            }
+            getPrefs().edit().putString("chats_json", chats.toString()).putString("current_chat_id", currentChatId).apply();
+        } catch (Exception ignored) {}
+    }
+
+    private void loadCurrentChat() {
+        history.length();
+        while (history.length() > 0) history.remove(history.length() - 1);
+        JSONArray chats = readChats();
+        for (int i = 0; i < chats.length(); i++) {
+            JSONObject chat = chats.optJSONObject(i);
+            if (chat != null && currentChatId.equals(chat.optString("id"))) {
+                currentChatTitle = chat.optString("title", "แชทใหม่");
+                JSONArray stored = chat.optJSONArray("messages");
+                if (stored != null) {
+                    for (int j = 0; j < stored.length(); j++) history.put(stored.optJSONObject(j));
+                }
+                return;
+            }
+        }
+        currentChatTitle = "แชทใหม่";
+    }
+
+    private void renderCurrentChat() {
+        messages.removeAllViews();
+        if (history.length() == 0) {
+            addWelcome();
+            return;
+        }
+        for (int i = 0; i < history.length(); i++) {
+            JSONObject item = history.optJSONObject(i);
+            if (item == null) continue;
+            String role = item.optString("role", "");
+            String text = item.optString("content", "");
+            if ("user".equals(role) || "assistant".equals(role)) {
+                TextView view = addBubble("user".equals(role) ? "คุณ" : "FoChat aii", text, "user".equals(role));
+                if ("user".equals(role)) view.setTag(i);
+            }
+        }
+        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private void createNewChat() {
+        if (busy) {
+            Toast.makeText(this, "รอให้ AI ตอบเสร็จก่อน", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        saveCurrentChat();
+        currentChatId = "chat_" + System.currentTimeMillis();
+        currentChatTitle = "แชทใหม่";
+        while (history.length() > 0) history.remove(history.length() - 1);
+        saveCurrentChat();
+        renderCurrentChat();
+        Toast.makeText(this, "สร้างแชทใหม่แล้ว", Toast.LENGTH_SHORT).show();
+    }
+
+    private void showChatHistory() {
+        JSONArray chats = readChats();
+        if (chats.length() == 0) {
+            Toast.makeText(this, "ยังไม่มีประวัติแชท", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] labels = new String[chats.length()];
+        String[] ids = new String[chats.length()];
+        for (int i = 0; i < chats.length(); i++) {
+            JSONObject chat = chats.optJSONObject(i);
+            labels[i] = chat == null ? "แชท" : chat.optString("title", "แชทใหม่");
+            ids[i] = chat == null ? "" : chat.optString("id", "");
+            if (ids[i].equals(currentChatId)) labels[i] = "✓ " + labels[i] + " (กำลังใช้งาน)";
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("ประวัติแชท")
+            .setItems(labels, (dialog, which) -> {
+                if (busy) {
+                    Toast.makeText(this, "รอให้ AI ตอบเสร็จก่อน", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                saveCurrentChat();
+                currentChatId = ids[which];
+                getPrefs().edit().putString("current_chat_id", currentChatId).apply();
+                loadCurrentChat();
+                renderCurrentChat();
+                Toast.makeText(this, "เปิดแชทแล้ว", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("ปิด", null)
+            .setNeutralButton("จัดการแชท", (dialog, which) -> showManageChats())
+            .show();
+    }
+
+    private void showManageChats() {
+        JSONArray chats = readChats();
+        String[] labels = new String[chats.length()];
+        for (int i = 0; i < chats.length(); i++) {
+            JSONObject chat = chats.optJSONObject(i);
+            labels[i] = chat == null ? "แชท" : chat.optString("title", "แชทใหม่");
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("เลือกแชทเพื่อเปลี่ยนชื่อหรือลบ")
+            .setItems(labels, (dialog, which) -> {
+                JSONObject chosen = chats.optJSONObject(which);
+                if (chosen == null) return;
+                String id = chosen.optString("id", "");
+                String[] options = {"เปลี่ยนชื่อ", "ลบแชท"};
+                new AlertDialog.Builder(this).setTitle(chosen.optString("title", "แชท"))
+                    .setItems(options, (d, selected) -> {
+                        if (selected == 0) renameChat(id, chosen.optString("title", "แชทใหม่"));
+                        else deleteChat(id);
+                    }).show();
+            }).setNegativeButton("ปิด", null).show();
+    }
+
+    private void renameChatIfNeeded(String prompt) {
+        if (!"แชทใหม่".equals(currentChatTitle)) return;
+        currentChatTitle = prompt.length() > 28 ? prompt.substring(0, 28) + "…" : prompt;
+        saveCurrentChat();
+    }
+
+    private void renameChat(String id, String oldTitle) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(oldTitle);
+        new AlertDialog.Builder(this).setTitle("เปลี่ยนชื่อแชท").setView(input)
+            .setNegativeButton("ยกเลิก", null)
+            .setPositiveButton("บันทึก", (d, w) -> {
+                String title = input.getText().toString().trim();
+                if (title.isEmpty()) return;
+                JSONArray chats = readChats();
+                for (int i = 0; i < chats.length(); i++) {
+                    JSONObject chat = chats.optJSONObject(i);
+                    if (chat != null && id.equals(chat.optString("id"))) {
+                        try { chat.put("title", title); } catch (Exception ignored) {}
+                    }
+                }
+                getPrefs().edit().putString("chats_json", chats.toString()).apply();
+                if (id.equals(currentChatId)) currentChatTitle = title;
+                showChatHistory();
+            }).show();
+    }
+
+    private void deleteChat(String id) {
+        if (id.equals(currentChatId) && busy) {
+            Toast.makeText(this, "รอให้ AI ตอบเสร็จก่อน", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        JSONArray old = readChats();
+        JSONArray keep = new JSONArray();
+        for (int i = 0; i < old.length(); i++) {
+            JSONObject chat = old.optJSONObject(i);
+            if (chat != null && !id.equals(chat.optString("id"))) keep.put(chat);
+        }
+        if (keep.length() == 0) {
+            try {
+                JSONObject fresh = new JSONObject();
+                fresh.put("id", "chat_" + System.currentTimeMillis());
+                fresh.put("title", "แชทใหม่");
+                fresh.put("messages", new JSONArray());
+                keep.put(fresh);
+            } catch (Exception ignored) {}
+        }
+        if (id.equals(currentChatId)) {
+            JSONObject next = keep.optJSONObject(0);
+            currentChatId = next == null ? "chat_default" : next.optString("id", "chat_default");
+            getPrefs().edit().putString("current_chat_id", currentChatId).apply();
+            loadCurrentChat();
+            renderCurrentChat();
+        }
+        getPrefs().edit().putString("chats_json", keep.toString()).apply();
+        Toast.makeText(this, "ลบแชทแล้ว", Toast.LENGTH_SHORT).show();
+    }
+
+    private void showApiKeyDialog(boolean allowCancel) {
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setHint("sk-or-v1-...");
