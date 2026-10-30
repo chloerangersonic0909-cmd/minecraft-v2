@@ -229,7 +229,7 @@ public class MainActivity extends Activity {
             if (!current) {
                 for (int r = 0; r < 5; r++) for (int c = 0; c < 5; c++) world[r][c] = ((int)(Math.random() * 4) == 0) ? "🪨" : "🟩";
                 x = 2; z = 2; y = 0; blocksPlaced = 0; blocksBroken = 0;
-                worldName.setText("🌿  New Creative World");
+                if (worldName != null) worldName.setText("🌿  New Creative World");
                 Toast.makeText(this, "Created a new demo world", Toast.LENGTH_SHORT).show();
             }
             showPage("play");
