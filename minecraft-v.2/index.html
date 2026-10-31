@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>minecraft-v.2 — Voxel World</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#87ceeb;font-family:system-ui,sans-serif;color:#fff}canvas{display:block}
+#hud{position:fixed;inset:0;pointer-events:none;text-shadow:0 2px 3px #000}
+#brand{position:absolute;top:12px;left:14px;font-weight:900;font-size:clamp(18px,4vw,28px);letter-spacing:.4px}
+#hint{position:absolute;top:52px;left:14px;font-size:12px;background:#0008;padding:7px 10px;border-radius:8px}
+#cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:22px}
+#hotbar{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:5px;pointer-events:auto}
+.slot{width:clamp(42px,9vw,58px);height:clamp(42px,9vw,58px);border:2px solid #ffffff88;background:#151515aa;border-radius:8px;display:grid;place-items:center;font-size:11px;text-align:center}
+.slot.active{border:3px solid white;background:#ffffff55}
+#controls{position:fixed;bottom:90px;left:14px;display:grid;grid-template-columns:48px 48px 48px;grid-template-rows:48px 48px;gap:5px;pointer-events:auto}
+.ctrl,#actions button,#menu button{border:1px solid #ffffff88;border-radius:12px;background:#151515b8;color:white;font-weight:800;font-size:18px;touch-action:none}
+.ctrl:nth-child(1){grid-column:2} .ctrl:nth-child(2){grid-column:1;grid-row:2}.ctrl:nth-child(3){grid-column:2;grid-row:2}.ctrl:nth-child(4){grid-column:3;grid-row:2}
+#actions{position:fixed;right:14px;bottom:95px;display:flex;flex-direction:column;gap:8px;pointer-events:auto}
+#actions button{padding:13px 14px;font-size:13px}
+#menu{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0009;pointer-events:auto}
+.panel{width:min(90vw,390px);background:#17232df2;border:1px solid #ffffff44;border-radius:18px;padding:24px;text-align:center;box-shadow:0 15px 50px #0006}
+.panel h1{margin:0 0 8px}.panel p{line-height:1.5;color:#dbeafe}.panel button{padding:12px 20px;margin:6px;cursor:pointer}
+#status{position:absolute;right:12px;top:12px;background:#0008;border-radius:8px;padding:6px 9px;font-size:12px}
+@media(min-width:800px){#controls,#actions{opacity:.8}#hint{max-width:380px}}
+</style>
+</head>
+<body>
+<div id="hud"><div id="brand">minecraft-v.2</div><div id="hint">WASD เคลื่อนที่ · Space กระโดด · คลิกซ้ายขุด · คลิกขวาวาง · 1–5 เลือกบล็อก</div><div id="cross">＋</div><div id="status">สร้างโลกแล้ว</div><div id="hotbar"></div></div>
+<div id="controls"><button class="ctrl" data-key="KeyW">▲</button><button class="ctrl" data-key="KeyA">◀</button><button class="ctrl" data-key="KeyS">▼</button><button class="ctrl" data-key="KeyD">▶</button></div>
+<div id="actions"><button id="jump">กระโดด ⤒</button><button id="mine">ขุด ⛏</button><button id="place">วาง ▪</button><button id="view">มุมมอง: บุคคลที่ 1</button></div>
+<div id="menu"><div class="panel"><h1>minecraft-v.2</h1><p>เกมสร้างโลกบล็อก 3 มิติที่เล่นได้จริง<br>ขุดบล็อก สร้างสิ่งปลูกสร้าง และสำรวจโลก</p><p style="font-size:12px">รุ่นเริ่มต้น: ระบบโลกและการวาง/ขุดบล็อกพื้นฐาน</p><button id="start">เริ่มเล่น</button><button id="save">บันทึกโลก</button><button id="load">โหลดโลก</button></div></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js';
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x87ceeb);scene.fog=new THREE.Fog(0x87ceeb,18,65);
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,1000);
+const renderer=new THREE.WebGLRenderer({antialias:false});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.shadowMap.enabled=false;document.body.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0x61734d,2));const sun=new THREE.DirectionalLight(0xffffff,2);sun.position.set(10,25,8);scene.add(sun);
+const materials={grass:new THREE.MeshLambertMaterial({color:0x65a843}),dirt:new THREE.MeshLambertMaterial({color:0x805334}),stone:new THREE.MeshLambertMaterial({color:0x858585}),sand:new THREE.MeshLambertMaterial({color:0xd9c27c}),wood:new THREE.MeshLambertMaterial({color:0x8a6038}),leaves:new THREE.MeshLambertMaterial({color:0x327c38}),water:new THREE.MeshLambertMaterial({color:0x388fdb,transparent:true,opacity:.65})};
+const names=Object.keys(materials), blocks=new Map(), cube=new THREE.BoxGeometry(1,1,1);let selected='grass',third=false,started=false;
+const key=(x,y,z)=>x+','+y+','+z;
+function addBlock(x,y,z,type='grass',persist=true){const k=key(x,y,z);if(blocks.has(k))return;const m=new THREE.Mesh(cube,materials[type]||materials.grass);m.position.set(x,y,z);m.userData={x,y,z,type};scene.add(m);blocks.set(k,m);return m}
+function removeBlock(m){if(!m)return;scene.remove(m);blocks.delete(key(m.userData.x,m.userData.y,m.userData.z))}
+for(let x=-16;x<=16;x++)for(let z=-16;z<=16;z++){let h=Math.floor(1+Math.sin(x*.34)*1.3+Math.cos(z*.28)*1.2);for(let y=-3;y<=h;y++)addBlock(x,y,z,y===h?'grass':y>h-3?'dirt':'stone');if(Math.random()<.035&&h>0){for(let y=h+1;y<h+4;y++)addBlock(x,y,z,'wood');for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(let dy=h+2;dy<=h+4;dy++)if(Math.abs(dx)+Math.abs(dz)+(dy===h+4?1:0)<4&&Math.random()>.12)addBlock(x+dx,dy,z+dz,'leaves')}}
+const player={x:0,y:6,z:0,vx:0,vy:0,vz:0,yaw:0,pitch:0,onGround:false};camera.position.set(0,7,0);
+const ray=new THREE.Raycaster();let hit=null;const keys=new Set();
+function target(){ray.setFromCamera(new THREE.Vector2(0,0),camera);return ray.intersectObjects([...blocks.values()],false).find(h=>h.distance<6)||null}
+function mine(){const h=target();if(h)removeBlock(h.object)}
+function place(){const h=target();if(!h)return;const p=h.object.position.clone().add(h.face.normal);addBlock(Math.round(p.x),Math.round(p.y),Math.round(p.z),selected)}
+const hot=document.querySelector('#hotbar');names.slice(0,5).forEach((n,i)=>{const b=document.createElement('button');b.className='slot'+(i===0?' active':'');b.textContent=['🟩','🟫','⬜','🟨','🪵'][i]+'\n'+n;b.onclick=()=>{selected=n;document.querySelectorAll('.slot').forEach(s=>s.classList.remove('active'));b.classList.add('active')};hot.append(b)});
+addEventListener('keydown',e=>{keys.add(e.code);if(/^Digit[1-5]$/.test(e.code)){const i=+e.code.slice(-1)-1;hot.children[i]?.click()}if(e.code==='Space')e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));
+document.querySelectorAll('.ctrl').forEach(b=>{const k=b.dataset.key;const on=e=>{e.preventDefault();keys.add(k)},off=e=>{e.preventDefault();keys.delete(k)};b.addEventListener('pointerdown',on);['pointerup','pointercancel','pointerleave'].forEach(ev=>b.addEventListener(ev,off))});
+document.querySelector('#jump').onpointerdown=()=>{if(player.onGround)player.vy=7};
+document.querySelector('#mine').onpointerdown=mine;document.querySelector('#place').onpointerdown=place;
+document.querySelector('#view').onclick=()=>{third=!third;document.querySelector('#view').textContent='มุมมอง: บุคคลที่ '+(third?'3':'1')};
+document.querySelector('#start').onclick=()=>{started=true;document.querySelector('#menu').style.display='none';renderer.domElement.requestPointerLock?.()};
+document.querySelector('#save').onclick=()=>{localStorage.setItem('voxelWorldV2',JSON.stringify([...blocks.values()].map(m=>m.userData)));document.querySelector('#status').textContent='บันทึกโลกแล้ว'};
+document.querySelector('#load').onclick=()=>{const data=JSON.parse(localStorage.getItem('voxelWorldV2')||'null');if(!data){document.querySelector('#status').textContent='ไม่พบโลกที่บันทึก';return}blocks.forEach(m=>scene.remove(m));blocks.clear();data.forEach(b=>addBlock(b.x,b.y,b.z,b.type));document.querySelector('#status').textContent='โหลดโลกแล้ว'};
+let dragging=false,lastX=0,lastY=0;renderer.domElement.addEventListener('click',()=>{if(started&&innerWidth>800)renderer.domElement.requestPointerLock?.()});document.addEventListener('mousemove',e=>{if(document.pointerLockElement===renderer.domElement){player.yaw-=e.movementX*.002;player.pitch-=e.movementY*.002;player.pitch=Math.max(-1.4,Math.min(1.4,player.pitch))}else if(dragging){player.yaw-=(e.clientX-lastX)*.006;player.pitch-=(e.clientY-lastY)*.006;lastX=e.clientX;lastY=e.clientY}});
+renderer.domElement.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'){dragging=true;lastX=e.clientX;lastY=e.clientY}});addEventListener('pointerup',()=>dragging=false);
+renderer.domElement.addEventListener('contextmenu',e=>{e.preventDefault();place()});renderer.domElement.addEventListener('mousedown',e=>{if(e.button===0&&started&&document.pointerLockElement===renderer.domElement)mine()});
+let prev=performance.now();function loop(now){requestAnimationFrame(loop);const dt=Math.min((now-prev)/1000,.04);prev=now;
+const forward=(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0),side=(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0);const speed=5;
+player.vx+=(Math.sin(player.yaw)*forward+Math.cos(player.yaw)*side)*speed*dt*5;player.vz+=(-Math.cos(player.yaw)*forward+Math.sin(player.yaw)*side)*speed*dt*5;player.vx*=Math.pow(.03,dt);player.vz*=Math.pow(.03,dt);
+const nx=player.x+player.vx*dt,nz=player.z+player.vz*dt;function solid(x,y,z){return blocks.has(key(Math.round(x),Math.floor(y),Math.round(z)))||blocks.has(key(Math.round(x),Math.floor(y+1),Math.round(z)))}
+if(!solid(nx,player.y,player.z))player.x=nx;else player.vx=0;if(!solid(player.x,player.y,nz))player.z=nz;else player.vz=0;
+player.vy-=18*dt;let ny=player.y+player.vy*dt;player.onGround=false;if(player.vy<=0&&solid(player.x,ny-.1,player.z)){player.onGround=true;player.vy=0;ny=Math.floor(ny)+1.01}player.y=Math.max(-8,ny);if(player.y< -6){player.x=0;player.y=8;player.z=0;player.vy=0}
+if(keys.has('Space')&&player.onGround)player.vy=7;
+if(third){camera.position.set(player.x-Math.sin(player.yaw)*5,player.y+2-player.pitch,player.z+Math.cos(player.yaw)*5);camera.lookAt(player.x,player.y+1.3,player.z)}else{camera.position.set(player.x,player.y+1.55,player.z);camera.rotation.order='YXZ';camera.rotation.set(player.pitch,player.yaw,0)}
+document.querySelector('#status').textContent='บล็อก '+blocks.size+' · '+selected;renderer.render(scene,camera)}
+requestAnimationFrame(loop);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+</script></body></html>
