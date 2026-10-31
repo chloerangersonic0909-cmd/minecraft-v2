@@ -400,7 +400,8 @@ public class MainActivity extends Activity {
                 }
             }).show();
     }
-\n    private void ensureChats() {
+
+    private void ensureChats() {
         try {
             JSONArray chats = new JSONArray(getPrefs().getString("chats_json", "[]"));
             if (chats.length() == 0) {
